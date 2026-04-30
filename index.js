@@ -7,10 +7,12 @@ dotenv.config();
 
 const app = express();
 
-// ✅ Keep open for now (safe for testing)
-// ⚠️ Later replace with your Vercel URL
-app.use(cors());
-// app.use(cors({ origin: ["https://your-app.vercel.app"] }));
+// ✅ FIXED CORS (important for Vercel → Render)
+app.use(cors({
+  origin: "*", // for now (safe for testing)
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"]
+}));
 
 app.use(express.json());
 
@@ -172,7 +174,7 @@ Turn every message into a clear, practical plan that improves the user’s life 
 });
 
 // ========================
-// START SERVER (FIXED)
+// START SERVER
 // ========================
 const PORT = process.env.PORT || 3001;
 
