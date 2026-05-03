@@ -16,6 +16,9 @@ app.use(cors({
   allowedHeaders: ["Content-Type"]
 }));
 
+// 🔥 CRITICAL: handle preflight requests
+app.options("*", cors());
+
 app.use(express.json());
 
 console.log("SERVER STARTING...");
