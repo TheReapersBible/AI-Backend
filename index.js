@@ -7,17 +7,17 @@ dotenv.config();
 
 const app = express();
 
-// ✅ FIXED CORS (your real Vercel URL)
+// ========================
+// ✅ FIXED CORS (production-safe)
+// ========================
 app.use(cors({
-  origin: [
-    "https://winners-image.vercel.app"
-  ],
+  origin: ["https://winners-image.vercel.app"],
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type"]
 }));
 
-// 🔥 CRITICAL: handle preflight requests
-app.options("*", cors());
+// 🔥 FIX for Express 5 / path-to-regexp crash
+app.options(/.*/, cors());
 
 app.use(express.json());
 
@@ -159,9 +159,6 @@ Turn every message into a clear, practical plan that improves the user’s life 
 
     let reply = completion.choices[0].message.content;
 
-    // ========================
-    // CLEAN RESPONSE
-    // ========================
     reply = reply.replace(/\?/g, ".");
 
     console.log("✅ AI RESPONSE SUCCESS");
