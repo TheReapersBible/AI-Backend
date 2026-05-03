@@ -8,15 +8,19 @@ dotenv.config();
 const app = express();
 
 // ========================
-// ✅ FIXED CORS (production-safe)
+// ✅ CORS FIX (Vercel + local + safety)
 // ========================
 app.use(cors({
-  origin: ["https://winners-image.vercel.app"],
-  methods: ["GET", "POST"],
+  origin: [
+    "https://winners-image.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000"
+  ],
+  methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type"]
 }));
 
-// 🔥 FIX for Express 5 / path-to-regexp crash
+// MUST handle preflight requests (fixes Failed to fetch)
 app.options(/.*/, cors());
 
 app.use(express.json());
@@ -104,50 +108,19 @@ app.post("/api/ai", async (req, res) => {
           content: `
 You are a powerful, strategic mentor who builds winners.
 
-Your thinking is based on:
-- Think and Grow Rich (Napoleon Hill)
-- The 48 Laws of Power (Robert Greene)
-- The Art of Seduction (Robert Greene)
-- The Art of War (Sun Tzu)
-- The way of the superior man (David Deida)
-- Pimp: The Story of My Life (Iceberg Slim)
-- The Power of the Subconscious Mind (Joseph Murphy)
-- Psycho Cybernetics (Maxwell Maltz)
-
 USER MEMORY:
-
-Recent Messages:
 ${memory.messages.slice(-5).join(" | ")}
 
-Goals:
+GOALS:
 ${memory.goals.slice(-3).join(" | ")}
 
-Traits / Patterns:
+TRAITS:
 ${memory.traits.slice(-3).join(" | ")}
 
 RULES:
-- Do NOT ask unnecessary questions
-- Give direct, actionable answers
-- Tell the user exactly what to do
-- Speak with confidence and authority
-- No weak or soft language
-- No therapy-style responses
-- Always provide a solution or strategy
-- Build the user into a disciplined, high-value individual
-
-RESPONSE STRUCTURE:
-1. Reality Check → what’s actually happening
-2. Strategy → what they need to do
-3. Example → real-world or relatable situation
-4. Action Step → clear next move immediately
-
-TONE:
-- Calm, smooth, slightly dominant
-- Mentor energy, not assistant energy
-- Never robotic, never generic
-
-Your goal:
-Turn every message into a clear, practical plan that improves the user’s life immediately.
+- Direct answers
+- No fluff
+- Actionable steps
 `
         },
         {
@@ -158,7 +131,6 @@ Turn every message into a clear, practical plan that improves the user’s life 
     });
 
     let reply = completion.choices[0].message.content;
-
     reply = reply.replace(/\?/g, ".");
 
     console.log("✅ AI RESPONSE SUCCESS");
@@ -170,13 +142,13 @@ Turn every message into a clear, practical plan that improves the user’s life 
     console.dir(error, { depth: null });
 
     res.status(500).json({
-      reply: "AI request failed (check backend logs)"
+      reply: "AI request failed"
     });
   }
 });
 
 // ========================
-// START SERVER
+// START SERVER (Render safe port)
 // ========================
 const PORT = process.env.PORT || 3001;
 
