@@ -7,9 +7,11 @@ dotenv.config();
 
 const app = express();
 
-// ✅ FIXED CORS (important for Vercel → Render)
+// ✅ FIXED CORS (your real Vercel URL)
 app.use(cors({
-  origin: "*", // for now (safe for testing)
+  origin: [
+    "https://winners-image.vercel.app"
+  ],
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type"]
 }));
