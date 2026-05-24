@@ -7,98 +7,113 @@ dotenv.config();
 
 const app = express();
 
-// ========================
-// ✅ CORS FIX (Vercel + local + safety)
-// ========================
+/* ========================
+   TRUST PROXY
+======================== */
+app.set("trust proxy", true);
+
+/* ========================
+   CORS FIX
+======================== */
 app.use(cors({
-  origin: [
-    "https://winners-image.vercel.app",
-    "http://localhost:5173",
-    "http://localhost:3000"
-  ],
+  origin: true,
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type"]
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
 }));
 
-// MUST handle preflight requests (fixes Failed to fetch)
-app.options(/.*/, cors());
+app.options("*", cors());
 
 app.use(express.json());
 
 console.log("SERVER STARTING...");
-console.log("API KEY LOADED:", process.env.OPENROUTER_API_KEY ? "YES" : "NO");
+console.log(
+  "API KEY LOADED:",
+  process.env.OPENROUTER_API_KEY ? "YES" : "NO"
+);
 
-// ========================
-// 🧠 MEMORY STORE (RAM)
-// ========================
+/* ========================
+   DEBUG ROUTES
+======================== */
+app.get("/", (req, res) => {
+  res.json({
+    status: "Backend running"
+  });
+});
+
+app.get("/debug123", (req, res) => {
+  res.json({
+    alive: true,
+    time: Date.now()
+  });
+});
+
+app.get("/api/test", (req, res) => {
+  res.json({
+    ok: true
+  });
+});
+
+/* ========================
+   MEMORY
+======================== */
 const userMemory = {};
 
-// simple user id (for now)
 function getUserId(req) {
-  return req.ip;
+  return req.ip || "unknown-user";
 }
 
-// OpenRouter client
+/* ========================
+   OPENROUTER
+======================== */
 const client = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY,
+  apiKey: process.env.OPENROUTER_API_KEY
 });
 
-// ========================
-// TEST ROUTE
-// ========================
-app.get("/", (req, res) => {
-  res.send("Backend is running");
-});
-
-// ========================
-// AI ROUTE (WITH MEMORY)
-// ========================
+/* ========================
+   AI ROUTE
+======================== */
 app.post("/api/ai", async (req, res) => {
   console.log("🔥 HIT /api/ai ROUTE");
 
-  const { message } = req.body;
-  const userId = getUserId(req);
-
-  if (!message) {
-    return res.status(400).json({ reply: "No message provided" });
-  }
-
-  // ========================
-  // INIT MEMORY IF NEW USER
-  // ========================
-  if (!userMemory[userId]) {
-    userMemory[userId] = {
-      messages: [],
-      goals: [],
-      traits: []
-    };
-  }
-
-  const memory = userMemory[userId];
-
-  // ========================
-  // STORE USER INPUT
-  // ========================
-  memory.messages.push(message);
-
-  const lowerMsg = message.toLowerCase();
-
-  if (
-    lowerMsg.includes("goal") ||
-    lowerMsg.includes("want") ||
-    lowerMsg.includes("need") ||
-    lowerMsg.includes("trying to")
-  ) {
-    memory.goals.push(message);
-  } else {
-    memory.traits.push(message);
-  }
-
-  console.log("🧠 MEMORY STATE:", memory);
-
   try {
-    console.log("CALLING OPENROUTER...");
+    const { message, images, videos } = req.body;
+
+    if (!message) {
+      return res.status(400).json({
+        reply: "Send a message first.",
+        images: [],
+        videos: []
+      });
+    }
+
+    const userId = getUserId(req);
+
+    if (!userMemory[userId]) {
+      userMemory[userId] = {
+        messages: [],
+        goals: [],
+        traits: []
+      };
+    }
+
+    const memory = userMemory[userId];
+
+    memory.messages.push(message);
+
+    const lower = message.toLowerCase();
+
+    if (
+      lower.includes("goal") ||
+      lower.includes("want") ||
+      lower.includes("need") ||
+      lower.includes("trying")
+    ) {
+      memory.goals.push(message);
+    } else {
+      memory.traits.push(message);
+    }
 
     const completion = await client.chat.completions.create({
       model: "meta-llama/llama-3.1-8b-instruct",
@@ -106,7 +121,16 @@ app.post("/api/ai", async (req, res) => {
         {
           role: "system",
           content: `
-You are a powerful, strategic mentor who builds winners.
+You are a funny, charismatic AI with real personality.
+
+STYLE:
+- Casual and human
+- Can joke around
+- Slight sarcasm allowed
+- A lot of profanity allowed
+- Not robotic
+- Not overly serious
+- similar to bernie mac or samuel L jackson with jokes
 
 USER MEMORY:
 ${memory.messages.slice(-5).join(" | ")}
@@ -117,10 +141,12 @@ ${memory.goals.slice(-3).join(" | ")}
 TRAITS:
 ${memory.traits.slice(-3).join(" | ")}
 
-RULES:
-- Direct answers
-- No fluff
-- Actionable steps
+Return STRICT JSON ONLY:
+{
+  "reply": "response",
+  "images": [],
+  "videos": []
+}
 `
         },
         {
@@ -130,26 +156,36 @@ RULES:
       ]
     });
 
-    let reply = completion.choices[0].message.content;
-    reply = reply.replace(/\?/g, ".");
+    const raw = completion.choices[0].message.content;
 
-    console.log("✅ AI RESPONSE SUCCESS");
+    let parsed;
 
-    res.json({ reply });
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = {
+        reply: raw,
+        images: [],
+        videos: []
+      };
+    }
+
+    return res.json(parsed);
 
   } catch (error) {
-    console.log("❌ OPENROUTER ERROR:");
-    console.dir(error, { depth: null });
+    console.log("❌ AI ERROR:", error);
 
-    res.status(500).json({
-      reply: "AI request failed"
+    return res.status(500).json({
+      reply: "AI request failed",
+      images: [],
+      videos: []
     });
   }
 });
 
-// ========================
-// START SERVER (Render safe port)
-// ========================
+/* ========================
+   START SERVER
+======================== */
 const PORT = process.env.PORT || 3001;
 
 app.listen(PORT, () => {

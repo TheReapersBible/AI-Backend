@@ -1,0 +1,17 @@
+[33mcommit 6f05cce910cb0e9373b960c125504f29019629f9[m
+Author: Bernkastel Rika <Mikeatolliver8@gmail.com>
+Date:   Thu Apr 30 16:29:54 2026 -0400
+
+    fix chat response bug
+
+[33mcommit 9023a2a2344cad9f21b5258f5749c8e6cb2d57e7[m
+Author: Bernkastel Rika <Mikeatolliver8@gmail.com>
+Date:   Sun Apr 26 22:46:58 2026 -0400
+
+    connect live backend
+
+[33mcommit 79c7bc72b7fa3d6c4e78da29f700a9ca72de921f[m
+Author: Bernkastel Rika <Mikeatolliver8@gmail.com>
+Date:   Thu Apr 23 03:03:09 2026 -0400
+
+    backend ready
