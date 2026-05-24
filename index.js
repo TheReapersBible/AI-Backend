@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import { connectDB } from "./db.js";
+import { upload } from "./upload.js";
 
 dotenv.config();
 
@@ -53,6 +55,21 @@ app.get("/api/test", (req, res) => {
   res.json({
     ok: true
   });
+});
+
+/* ========================
+   UPLOAD ROUTE (NEW)
+======================== */
+app.post("/api/upload", upload.single("file"), (req, res) => {
+  try {
+    res.json({
+      url: req.file.path
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Upload failed"
+    });
+  }
 });
 
 /* ========================
@@ -134,7 +151,6 @@ STYLE:
 - Slight sarcasm allowed
 - A lot of profanity allowed
 - Not robotic
-- Not overly serious
 - Similar energy to Bernie Mac or Samuel L. Jackson
 
 USER MEMORY:
@@ -147,12 +163,10 @@ TRAITS:
 ${memory.traits.slice(-3).join(" | ")}
 
 IMPORTANT:
-- Connect emotionally with the user naturally
-- Don't act like a therapist
-- Don't overreact to small problems
-- Sometimes joke or roast lightly
-- Keep responses entertaining but useful
-- Talk like a real person, not a motivational robot
+- Connect naturally and emotionally
+- Joke sometimes
+- Be real, not robotic
+- No therapist energy
 
 Return STRICT JSON ONLY:
 {
@@ -200,6 +214,8 @@ Return STRICT JSON ONLY:
    START SERVER
 ======================== */
 const PORT = process.env.PORT || 3001;
+
+connectDB().catch(err => console.log(err));
 
 app.listen(PORT, () => {
   console.log(`SERVER RUNNING ON PORT ${PORT}`);
