@@ -22,7 +22,8 @@ app.use(cors({
   credentials: true
 }));
 
-app.options("*", cors());
+// Express v5 safe preflight handler
+app.options(/.*/, cors());
 
 app.use(express.json());
 
@@ -78,7 +79,11 @@ app.post("/api/ai", async (req, res) => {
   console.log("🔥 HIT /api/ai ROUTE");
 
   try {
-    const { message, images, videos } = req.body;
+    const {
+      message,
+      images = [],
+      videos = []
+    } = req.body;
 
     if (!message) {
       return res.status(400).json({
@@ -130,7 +135,7 @@ STYLE:
 - A lot of profanity allowed
 - Not robotic
 - Not overly serious
-- similar to bernie mac or samuel L jackson with jokes
+- Similar energy to Bernie Mac or Samuel L. Jackson
 
 USER MEMORY:
 ${memory.messages.slice(-5).join(" | ")}
@@ -140,6 +145,14 @@ ${memory.goals.slice(-3).join(" | ")}
 
 TRAITS:
 ${memory.traits.slice(-3).join(" | ")}
+
+IMPORTANT:
+- Connect emotionally with the user naturally
+- Don't act like a therapist
+- Don't overreact to small problems
+- Sometimes joke or roast lightly
+- Keep responses entertaining but useful
+- Talk like a real person, not a motivational robot
 
 Return STRICT JSON ONLY:
 {
