@@ -3,21 +3,14 @@ import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
 import { connectDB } from "./db.js";
-import { upload } from "./upload.js";
 import multer from "multer";
 
 dotenv.config();
 
 const app = express();
 
-/* ========================
-   TRUST PROXY
-======================== */
 app.set("trust proxy", true);
 
-/* ========================
-   CORS FIX
-======================== */
 app.use(cors({
   origin: true,
   methods: ["GET", "POST", "OPTIONS"],
@@ -25,53 +18,31 @@ app.use(cors({
   credentials: true
 }));
 
-// Express v5 safe preflight handler
 app.options(/.*/, cors());
-
 app.use(express.json());
 
 console.log("SERVER STARTING...");
-console.log(
-  "API KEY LOADED:",
-  process.env.OPENROUTER_API_KEY ? "YES" : "NO"
-);
+console.log("API KEY LOADED:", process.env.OPENROUTER_API_KEY ? "YES" : "NO");
+console.log("PEXELS KEY LOADED:", process.env.PEXELS_API_KEY ? "YES" : "NO");
 
 /* ========================
    DEBUG ROUTES
 ======================== */
-app.get("/", (req, res) => {
-  res.json({
-    status: "Backend running"
-  });
-});
-
-app.get("/debug123", (req, res) => {
-  res.json({
-    alive: true,
-    time: Date.now()
-  });
-});
-
-app.get("/api/test", (req, res) => {
-  res.json({
-    ok: true
-  });
-});
+app.get("/", (req, res) => res.json({ status: "Backend running" }));
+app.get("/debug123", (req, res) => res.json({ alive: true, time: Date.now() }));
+app.get("/api/test", (req, res) => res.json({ ok: true }));
 
 /* ========================
-   UPLOAD (NEW FIXED SYSTEM)
+   UPLOAD
 ======================== */
 const storage = multer.memoryStorage();
 const uploadMiddleware = multer({ storage });
 
 app.post("/api/upload", uploadMiddleware.single("file"), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: "No file uploaded" });
-    }
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
     const cloudinary = await import("cloudinary");
-
     cloudinary.v2.config({
       cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
       api_key: process.env.CLOUDINARY_API_KEY,
@@ -87,22 +58,15 @@ app.post("/api/upload", uploadMiddleware.single("file"), async (req, res) => {
             else resolve(result);
           }
         );
-
         stream.end(fileBuffer);
       });
 
     const result = await streamUpload(req.file.buffer);
-
-    return res.json({
-      url: result.secure_url
-    });
+    return res.json({ url: result.secure_url });
 
   } catch (error) {
     console.log("UPLOAD ERROR:", error);
-
-    return res.status(500).json({
-      error: "Upload failed"
-    });
+    return res.status(500).json({ error: "Upload failed" });
   }
 });
 
@@ -116,7 +80,44 @@ function getUserId(req) {
 }
 
 /* ========================
-   OPENROUTER
+   PEXELS HELPERS
+======================== */
+async function searchPexelsPhotos(query) {
+  try {
+    const res = await fetch(
+      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=2&orientation=landscape`,
+      { headers: { Authorization: process.env.PEXELS_API_KEY } }
+    );
+    const data = await res.json();
+    return (data.photos || []).map(p => ({
+      url: p.src.large,
+      alt: p.alt || query
+    }));
+  } catch (err) {
+    console.log("PEXELS PHOTO ERROR:", err);
+    return [];
+  }
+}
+
+async function searchPexelsVideos(query) {
+  try {
+    const res = await fetch(
+      `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}&per_page=1`,
+      { headers: { Authorization: process.env.PEXELS_API_KEY } }
+    );
+    const data = await res.json();
+    return (data.videos || []).map(v => {
+      const file = v.video_files.find(f => f.quality === "hd") || v.video_files[0];
+      return { url: file.link };
+    });
+  } catch (err) {
+    console.log("PEXELS VIDEO ERROR:", err);
+    return [];
+  }
+}
+
+/* ========================
+   OPENROUTER CLIENT
 ======================== */
 const client = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -130,47 +131,29 @@ app.post("/api/ai", async (req, res) => {
   console.log("🔥 HIT /api/ai ROUTE");
 
   try {
-    const {
-      message,
-      images = [],
-      videos = []
-    } = req.body;
+    const { message } = req.body;
 
     if (!message) {
-      return res.status(400).json({
-        reply: "Send a message first.",
-        images: [],
-        videos: []
-      });
+      return res.status(400).json({ reply: "Send a message first.", images: [], videos: [] });
     }
 
     const userId = getUserId(req);
 
     if (!userMemory[userId]) {
-      userMemory[userId] = {
-        messages: [],
-        goals: [],
-        traits: []
-      };
+      userMemory[userId] = { messages: [], goals: [], traits: [] };
     }
 
     const memory = userMemory[userId];
-
     memory.messages.push(message);
 
     const lower = message.toLowerCase();
-
-    if (
-      lower.includes("goal") ||
-      lower.includes("want") ||
-      lower.includes("need") ||
-      lower.includes("trying")
-    ) {
+    if (lower.includes("goal") || lower.includes("want") || lower.includes("need") || lower.includes("trying")) {
       memory.goals.push(message);
     } else {
       memory.traits.push(message);
     }
 
+    /* ---- STEP 1: Ask AI what to say + what media to search for ---- */
     const completion = await client.chat.completions.create({
       model: "meta-llama/llama-3.1-8b-instruct",
       messages: [
@@ -200,12 +183,17 @@ IMPORTANT:
 - Joke sometimes
 - Be real, not robotic
 - No therapist energy
+- Decide if the response would be BETTER with a photo, a video, or neither
+- Only include media if it genuinely adds value (motivation, visualization, demonstration)
+- For motivational topics suggest an image search term
+- For workout/exercise topics suggest a video search term
+- For pure conversation set both to null
 
-Return STRICT JSON ONLY:
+Return STRICT JSON ONLY, no markdown, no backticks:
 {
-  "reply": "response",
-  "images": [],
-  "videos": []
+  "reply": "your response here",
+  "imageSearch": "search term for a relevant photo or null",
+  "videoSearch": "search term for a relevant video or null"
 }
 `
         },
@@ -216,30 +204,36 @@ Return STRICT JSON ONLY:
       ]
     });
 
-    const raw = completion.choices[0].message.content;
+    const raw = completion.choices[0].message.content.trim();
 
     let parsed;
-
     try {
-      parsed = JSON.parse(raw);
+      // Strip any accidental markdown fences
+      const clean = raw.replace(/```json|```/g, "").trim();
+      parsed = JSON.parse(clean);
     } catch {
-      parsed = {
-        reply: raw,
-        images: [],
-        videos: []
-      };
+      parsed = { reply: raw, imageSearch: null, videoSearch: null };
     }
 
-    return res.json(parsed);
+    /* ---- STEP 2: Fetch real media from Pexels ---- */
+    const [images, videos] = await Promise.all([
+      parsed.imageSearch ? searchPexelsPhotos(parsed.imageSearch) : Promise.resolve([]),
+      parsed.videoSearch ? searchPexelsVideos(parsed.videoSearch) : Promise.resolve([])
+    ]);
+
+    console.log("✅ Reply:", parsed.reply?.slice(0, 60));
+    console.log("🖼 Images fetched:", images.length);
+    console.log("🎬 Videos fetched:", videos.length);
+
+    return res.json({
+      reply: parsed.reply,
+      images,
+      videos
+    });
 
   } catch (error) {
     console.log("❌ AI ERROR:", error);
-
-    return res.status(500).json({
-      reply: "AI request failed",
-      images: [],
-      videos: []
-    });
+    return res.status(500).json({ reply: "AI request failed", images: [], videos: [] });
   }
 });
 
