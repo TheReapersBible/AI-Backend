@@ -24,6 +24,8 @@ app.use(express.json());
 console.log("SERVER STARTING...");
 console.log("API KEY LOADED:", process.env.OPENROUTER_API_KEY ? "YES" : "NO");
 console.log("PEXELS KEY LOADED:", process.env.PEXELS_API_KEY ? "YES" : "NO");
+console.log("GOOGLE KEY LOADED:", process.env.GOOGLE_API_KEY ? "YES" : "NO");
+console.log("GOOGLE CSE ID LOADED:", process.env.GOOGLE_CSE_ID ? "YES" : "NO");
 
 /* ========================
    DEBUG ROUTES
@@ -80,25 +82,34 @@ function getUserId(req) {
 }
 
 /* ========================
-   PEXELS HELPERS
+   GOOGLE IMAGE SEARCH
 ======================== */
-async function searchPexelsPhotos(query) {
+async function searchGoogleImages(query) {
   try {
-    const res = await fetch(
-      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=1&orientation=landscape`,
-      { headers: { Authorization: process.env.PEXELS_API_KEY } }
-    );
+    const url = `https://www.googleapis.com/customsearch/v1?key=${process.env.GOOGLE_API_KEY}&cx=${process.env.GOOGLE_CSE_ID}&q=${encodeURIComponent(query)}&searchType=image&num=1&safe=active&imgSize=large`;
+
+    const res = await fetch(url);
     const data = await res.json();
-    return (data.photos || []).map(p => ({
-      url: p.src.large,
-      alt: p.alt || query
+
+    if (!data.items || data.items.length === 0) {
+      console.log("Google found no images for:", query);
+      return [];
+    }
+
+    return data.items.map(item => ({
+      url: item.link,
+      alt: item.title || query
     }));
+
   } catch (err) {
-    console.log("PEXELS PHOTO ERROR:", err);
+    console.log("GOOGLE IMAGE ERROR:", err);
     return [];
   }
 }
 
+/* ========================
+   PEXELS VIDEO SEARCH
+======================== */
 async function searchPexelsVideos(query) {
   try {
     const res = await fetch(
@@ -249,9 +260,9 @@ Return STRICT JSON ONLY, no markdown, no backticks, no extra text:
       parsed = { reply: raw };
     }
 
-    /* ---- STEP 2: Fetch media based on our own keyword detection ---- */
+    /* ---- STEP 2: Fetch media based on keyword detection ---- */
     const [images, videos] = await Promise.all([
-      isImageRequest ? searchPexelsPhotos(searchTerm) : Promise.resolve([]),
+      isImageRequest ? searchGoogleImages(searchTerm) : Promise.resolve([]),
       isVideoRequest ? searchPexelsVideos(searchTerm) : Promise.resolve([])
     ]);
 
