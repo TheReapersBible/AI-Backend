@@ -137,12 +137,18 @@ function detectMediaRequest(message) {
     "show me", "send me a pic", "give me a photo", "give me a picture",
     "show me a pic", "show me a photo", "show me a picture", "send a pic",
     "send a photo", "i want to see", "let me see", "picture of", "photo of",
-    "image of", "pic of"
+    "image of", "pic of", "can u show me", "can you show me",
+    "can u send", "can you send", "can u give me", "can you give me",
+    "can u find", "can you find", "find me a pic", "find me a photo",
+    "find a pic", "find a photo", "get me a pic", "get me a photo",
+    "show a pic", "show a photo", "send me", "show me a", "give me a",
+    "can u", "can you"
   ];
 
   const videoKeywords = [
     "show me a video", "send me a video", "find me a video", "video of",
-    "give me a video", "i want to watch", "let me watch", "play a video"
+    "give me a video", "i want to watch", "let me watch", "play a video",
+    "can u show me a video", "can you show me a video"
   ];
 
   const isImageRequest = imageKeywords.some(k => lower.includes(k));
@@ -152,12 +158,28 @@ function detectMediaRequest(message) {
     return { isImageRequest: false, isVideoRequest: false, searchTerm: null };
   }
 
-  // Strip the request phrase and use the rest as the search term
+  // Strip ALL keyword phrases first
   let searchTerm = lower;
   [...imageKeywords, ...videoKeywords].forEach(k => {
-    searchTerm = searchTerm.replace(k, "");
+    searchTerm = searchTerm.replace(new RegExp(k, "g"), "");
   });
-  searchTerm = searchTerm.replace(/[^a-z0-9 ]/g, "").trim();
+
+  // Remove leftover filler words
+  const fillerWords = [
+    "a", "an", "the", "of", "me", "my", "please", "pls", "plz",
+    "pic", "photo", "picture", "image", "video", "send", "show",
+    "give", "find", "get", "can", "u", "you", "i", "want", "to",
+    "see", "watch", "some", "just", "really", "very"
+  ];
+
+  fillerWords.forEach(w => {
+    searchTerm = searchTerm.replace(new RegExp(`\\b${w}\\b`, "g"), "");
+  });
+
+  // Clean up extra spaces and special characters
+  searchTerm = searchTerm.replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+
+  console.log("🧹 Cleaned search term:", searchTerm);
 
   // Fallback if nothing left after stripping
   if (!searchTerm || searchTerm.length < 2) searchTerm = message;
