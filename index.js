@@ -85,7 +85,7 @@ function getUserId(req) {
 async function searchPexelsPhotos(query) {
   try {
     const res = await fetch(
-      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=2&orientation=landscape`,
+      `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=1&orientation=landscape`,
       { headers: { Authorization: process.env.PEXELS_API_KEY } }
     );
     const data = await res.json();
@@ -153,7 +153,7 @@ app.post("/api/ai", async (req, res) => {
       memory.traits.push(message);
     }
 
-    /* ---- STEP 1: Ask AI what to say + what media to search for ---- */
+    /* ---- STEP 1: Ask AI what to say + what media to search ---- */
     const completion = await client.chat.completions.create({
       model: "meta-llama/llama-3.1-8b-instruct",
       messages: [
@@ -183,17 +183,19 @@ IMPORTANT:
 - Joke sometimes
 - Be real, not robotic
 - No therapist energy
-- Decide if the response would be BETTER with a photo, a video, or neither
-- Only include media if it genuinely adds value (motivation, visualization, demonstration)
-- For motivational topics suggest an image search term
-- For workout/exercise topics suggest a video search term
-- For pure conversation set both to null
 
-Return STRICT JSON ONLY, no markdown, no backticks:
+MEDIA RULES — be very strict about these:
+- ONLY set imageSearch if the user explicitly asks to see a photo, image, or visual of something specific
+- ONLY set videoSearch if the user explicitly asks for a video, tutorial, or wants to see something demonstrated
+- For ALL normal conversation, advice, jokes, motivation, and general chat set BOTH to null
+- Do NOT send media just because the topic is visual or motivational
+- When in doubt, set both to null
+
+Return STRICT JSON ONLY, no markdown, no backticks, no extra text:
 {
   "reply": "your response here",
-  "imageSearch": "search term for a relevant photo or null",
-  "videoSearch": "search term for a relevant video or null"
+  "imageSearch": null,
+  "videoSearch": null
 }
 `
         },
@@ -208,17 +210,20 @@ Return STRICT JSON ONLY, no markdown, no backticks:
 
     let parsed;
     try {
-      // Strip any accidental markdown fences
       const clean = raw.replace(/```json|```/g, "").trim();
       parsed = JSON.parse(clean);
     } catch {
       parsed = { reply: raw, imageSearch: null, videoSearch: null };
     }
 
-    /* ---- STEP 2: Fetch real media from Pexels ---- */
+    /* ---- STEP 2: Only fetch media if AI explicitly set a search term ---- */
     const [images, videos] = await Promise.all([
-      parsed.imageSearch ? searchPexelsPhotos(parsed.imageSearch) : Promise.resolve([]),
-      parsed.videoSearch ? searchPexelsVideos(parsed.videoSearch) : Promise.resolve([])
+      parsed.imageSearch && typeof parsed.imageSearch === "string"
+        ? searchPexelsPhotos(parsed.imageSearch)
+        : Promise.resolve([]),
+      parsed.videoSearch && typeof parsed.videoSearch === "string"
+        ? searchPexelsVideos(parsed.videoSearch)
+        : Promise.resolve([])
     ]);
 
     console.log("✅ Reply:", parsed.reply?.slice(0, 60));
