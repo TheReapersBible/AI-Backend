@@ -117,6 +117,44 @@ async function searchPexelsVideos(query) {
 }
 
 /* ========================
+   KEYWORD MEDIA DETECTOR
+======================== */
+function detectMediaRequest(message) {
+  const lower = message.toLowerCase();
+
+  const imageKeywords = [
+    "show me", "send me a pic", "give me a photo", "give me a picture",
+    "show me a pic", "show me a photo", "show me a picture", "send a pic",
+    "send a photo", "i want to see", "let me see", "picture of", "photo of",
+    "image of", "pic of"
+  ];
+
+  const videoKeywords = [
+    "show me a video", "send me a video", "find me a video", "video of",
+    "give me a video", "i want to watch", "let me watch", "play a video"
+  ];
+
+  const isImageRequest = imageKeywords.some(k => lower.includes(k));
+  const isVideoRequest = videoKeywords.some(k => lower.includes(k));
+
+  if (!isImageRequest && !isVideoRequest) {
+    return { isImageRequest: false, isVideoRequest: false, searchTerm: null };
+  }
+
+  // Strip the request phrase and use the rest as the search term
+  let searchTerm = lower;
+  [...imageKeywords, ...videoKeywords].forEach(k => {
+    searchTerm = searchTerm.replace(k, "");
+  });
+  searchTerm = searchTerm.replace(/[^a-z0-9 ]/g, "").trim();
+
+  // Fallback if nothing left after stripping
+  if (!searchTerm || searchTerm.length < 2) searchTerm = message;
+
+  return { isImageRequest, isVideoRequest, searchTerm };
+}
+
+/* ========================
    OPENROUTER CLIENT
 ======================== */
 const client = new OpenAI({
@@ -153,7 +191,12 @@ app.post("/api/ai", async (req, res) => {
       memory.traits.push(message);
     }
 
-    /* ---- STEP 1: Ask AI what to say + what media to search ---- */
+    // Detect media request before calling AI
+    const { isImageRequest, isVideoRequest, searchTerm } = detectMediaRequest(message);
+
+    console.log("🔍 Media detected:", { isImageRequest, isVideoRequest, searchTerm });
+
+    /* ---- STEP 1: AI reply only ---- */
     const completion = await client.chat.completions.create({
       model: "meta-llama/llama-3.1-8b-instruct",
       messages: [
@@ -169,11 +212,10 @@ PERSONALITY:
 - Similar energy to Bernie Mac or Samuel L. Jackson
 
 RULES — non negotiable:
-- If the user asks for a photo or image, you MUST set imageSearch to a relevant search term. No exceptions.
-- If the user asks for a video, you MUST set videoSearch to a relevant search term. No exceptions.
-- NEVER joke your way out of a request. Do what they ask FIRST, then you can add personality.
-- If someone says "show me", "send me a pic", "give me a photo", "find me a video" — that is a direct order. Follow it.
-- Only set imageSearch and videoSearch to null for pure conversation where no media was asked for.
+- If the user asked for a photo or video, acknowledge that you are sending it. Do not joke your way out of it.
+- Do what they ask FIRST, then you can add personality.
+- Be real, not robotic.
+- No therapist energy.
 
 USER MEMORY:
 ${memory.messages.slice(-5).join(" | ")}
@@ -186,9 +228,7 @@ ${memory.traits.slice(-3).join(" | ")}
 
 Return STRICT JSON ONLY, no markdown, no backticks, no extra text:
 {
-  "reply": "your response here",
-  "imageSearch": "search term here or null",
-  "videoSearch": "search term here or null"
+  "reply": "your response here"
 }
 `
         },
@@ -206,17 +246,13 @@ Return STRICT JSON ONLY, no markdown, no backticks, no extra text:
       const clean = raw.replace(/```json|```/g, "").trim();
       parsed = JSON.parse(clean);
     } catch {
-      parsed = { reply: raw, imageSearch: null, videoSearch: null };
+      parsed = { reply: raw };
     }
 
-    /* ---- STEP 2: Only fetch media if AI explicitly set a search term ---- */
+    /* ---- STEP 2: Fetch media based on our own keyword detection ---- */
     const [images, videos] = await Promise.all([
-      parsed.imageSearch && typeof parsed.imageSearch === "string" && parsed.imageSearch !== "null"
-        ? searchPexelsPhotos(parsed.imageSearch)
-        : Promise.resolve([]),
-      parsed.videoSearch && typeof parsed.videoSearch === "string" && parsed.videoSearch !== "null"
-        ? searchPexelsVideos(parsed.videoSearch)
-        : Promise.resolve([])
+      isImageRequest ? searchPexelsPhotos(searchTerm) : Promise.resolve([]),
+      isVideoRequest ? searchPexelsVideos(searchTerm) : Promise.resolve([])
     ]);
 
     console.log("✅ Reply:", parsed.reply?.slice(0, 60));
