@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import { connectDB } from "./db.js";
 import { upload } from "./upload.js";
+import multer from "multer";
 
 dotenv.config();
 
@@ -58,15 +59,48 @@ app.get("/api/test", (req, res) => {
 });
 
 /* ========================
-   UPLOAD ROUTE (NEW)
+   UPLOAD (NEW FIXED SYSTEM)
 ======================== */
-app.post("/api/upload", upload.single("file"), (req, res) => {
+const storage = multer.memoryStorage();
+const uploadMiddleware = multer({ storage });
+
+app.post("/api/upload", uploadMiddleware.single("file"), async (req, res) => {
   try {
-    res.json({
-      url: req.file.path
+    if (!req.file) {
+      return res.status(400).json({ error: "No file uploaded" });
+    }
+
+    const cloudinary = await import("cloudinary");
+
+    cloudinary.v2.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
     });
+
+    const streamUpload = (fileBuffer) =>
+      new Promise((resolve, reject) => {
+        const stream = cloudinary.v2.uploader.upload_stream(
+          { resource_type: "auto", folder: "ai-media" },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+
+        stream.end(fileBuffer);
+      });
+
+    const result = await streamUpload(req.file.buffer);
+
+    return res.json({
+      url: result.secure_url
+    });
+
   } catch (error) {
-    res.status(500).json({
+    console.log("UPLOAD ERROR:", error);
+
+    return res.status(500).json({
       error: "Upload failed"
     });
   }
@@ -150,7 +184,6 @@ STYLE:
 - Can joke around
 - Slight sarcasm allowed
 - A lot of profanity allowed
-- Not robotic
 - Similar energy to Bernie Mac or Samuel L. Jackson
 
 USER MEMORY:
