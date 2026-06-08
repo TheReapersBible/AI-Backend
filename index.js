@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import { connectDB } from "./db.js";
 import multer from "multer";
+import mongoose from "mongoose";
 
 dotenv.config();
 
@@ -26,6 +27,33 @@ console.log("API KEY LOADED:", process.env.OPENROUTER_API_KEY ? "YES" : "NO");
 console.log("PEXELS KEY LOADED:", process.env.PEXELS_API_KEY ? "YES" : "NO");
 console.log("GOOGLE KEY LOADED:", process.env.GOOGLE_API_KEY ? "YES" : "NO");
 console.log("GOOGLE CSE ID LOADED:", process.env.GOOGLE_CSE_ID ? "YES" : "NO");
+
+/* ========================
+   MONGODB SCHEMAS
+======================== */
+const userSchema = new mongoose.Schema({
+  userId: { type: String, unique: true },
+  goals: [String],
+  traits: [String],
+  alterEgo: {
+    name: String,
+    traits: [String],
+    mission: String,
+    active: { type: Boolean, default: false }
+  },
+  winScore: { type: Number, default: 5 },
+  createdAt: { type: Date, default: Date.now }
+});
+
+const messageSchema = new mongoose.Schema({
+  userId: String,
+  role: String,
+  text: String,
+  createdAt: { type: Date, default: Date.now }
+});
+
+const User = mongoose.models.User || mongoose.model("User", userSchema);
+const Message = mongoose.models.Message || mongoose.model("Message", messageSchema);
 
 /* ========================
    DEBUG ROUTES
@@ -73,34 +101,21 @@ app.post("/api/upload", uploadMiddleware.single("file"), async (req, res) => {
 });
 
 /* ========================
-   MEMORY
-======================== */
-const userMemory = {};
-
-function getUserId(req) {
-  return req.ip || "unknown-user";
-}
-
-/* ========================
    GOOGLE IMAGE SEARCH
 ======================== */
 async function searchGoogleImages(query) {
   try {
-    const url = `https://www.googleapis.com/customsearch/v1?key=${process.env.GOOGLE_API_KEY}&cx=${process.env.GOOGLE_CSE_ID}&q=${encodeURIComponent(query)}&searchType=image&num=1&safe=active&imgSize=large`;
-
+    const url = `https://www.googleapis.com/customsearch/v1?key=${process.env.GOOGLE_API_KEY}&cx=${process.env.GOOGLE_CSE_ID}&q=${encodeURIComponent(query)}&searchType=image&num=1&safe=active`;
     const res = await fetch(url);
     const data = await res.json();
-
     if (!data.items || data.items.length === 0) {
       console.log("Google found no images for:", query);
       return [];
     }
-
     return data.items.map(item => ({
       url: item.link,
       alt: item.title || query
     }));
-
   } catch (err) {
     console.log("GOOGLE IMAGE ERROR:", err);
     return [];
@@ -158,13 +173,11 @@ function detectMediaRequest(message) {
     return { isImageRequest: false, isVideoRequest: false, searchTerm: null };
   }
 
-  // Strip ALL keyword phrases first
   let searchTerm = lower;
   [...imageKeywords, ...videoKeywords].forEach(k => {
     searchTerm = searchTerm.replace(new RegExp(k, "g"), "");
   });
 
-  // Remove leftover filler words
   const fillerWords = [
     "a", "an", "the", "of", "me", "my", "please", "pls", "plz",
     "pic", "photo", "picture", "image", "video", "send", "show",
@@ -176,15 +189,80 @@ function detectMediaRequest(message) {
     searchTerm = searchTerm.replace(new RegExp(`\\b${w}\\b`, "g"), "");
   });
 
-  // Clean up extra spaces and special characters
   searchTerm = searchTerm.replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
-
   console.log("🧹 Cleaned search term:", searchTerm);
 
-  // Fallback if nothing left after stripping
   if (!searchTerm || searchTerm.length < 2) searchTerm = message;
 
   return { isImageRequest, isVideoRequest, searchTerm };
+}
+
+/* ========================
+   MIRROR TALK DETECTOR
+======================== */
+function needsMirrorTalk(message) {
+  const lower = message.toLowerCase();
+  const triggers = [
+    "i don't know", "i dont know", "i can't", "i cant",
+    "i'm not sure", "im not sure", "maybe i should just",
+    "i give up", "it's hard", "its hard", "i'm lost", "im lost",
+    "i don't think i can", "i dont think i can", "what's the point",
+    "whats the point", "be real with me", "mirror talk",
+    "am i doing enough", "i feel stuck", "i'm stuck", "im stuck",
+    "i don't know what to do", "i dont know what to do",
+    "i'm failing", "im failing", "i feel like giving up"
+  ];
+  return triggers.some(t => lower.includes(t));
+}
+
+/* ========================
+   ALTER EGO DETECTOR
+======================== */
+function isAlterEgoRequest(message) {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("create my alter ego") ||
+    lower.includes("make my alter ego") ||
+    lower.includes("set up my alter ego") ||
+    lower.includes("change my alter ego") ||
+    lower.includes("update my alter ego")
+  );
+}
+
+/* ========================
+   WIN SCORE CALCULATOR
+======================== */
+function calculateWinScore(message, goals) {
+  const lower = message.toLowerCase();
+  let score = 5;
+
+  const positiveSignals = [
+    "i did", "i finished", "i completed", "i worked out", "i saved",
+    "i woke up early", "i read", "i studied", "i practiced",
+    "i accomplished", "i achieved", "i hit my goal", "i stayed consistent",
+    "i didn't", "i resisted", "i said no"
+  ];
+
+  const negativeSignals = [
+    "i wasted", "i spent", "i skipped", "i didn't work out",
+    "i slept in", "i gave up", "i failed", "i couldn't",
+    "i procrastinated", "i was lazy", "i blew it"
+  ];
+
+  positiveSignals.forEach(s => { if (lower.includes(s)) score += 1; });
+  negativeSignals.forEach(s => { if (lower.includes(s)) score -= 1; });
+
+  // Check alignment with goals
+  if (goals && goals.length > 0) {
+    goals.forEach(goal => {
+      const goalWords = goal.toLowerCase().split(" ");
+      goalWords.forEach(word => {
+        if (word.length > 4 && lower.includes(word)) score += 0.5;
+      });
+    });
+  }
+
+  return Math.min(10, Math.max(1, Math.round(score)));
 }
 
 /* ========================
@@ -205,70 +283,131 @@ app.post("/api/ai", async (req, res) => {
     const { message } = req.body;
 
     if (!message) {
-      return res.status(400).json({ reply: "Send a message first.", images: [], videos: [] });
+      return res.status(400).json({
+        reply: "Send a message first.",
+        images: [],
+        videos: [],
+        winScore: null,
+        mirrorTalk: null,
+        alterEgoActive: false
+      });
     }
 
-    const userId = getUserId(req);
+    const userId = req.ip || "unknown-user";
 
-    if (!userMemory[userId]) {
-      userMemory[userId] = { messages: [], goals: [], traits: [] };
+    // Load or create user from MongoDB
+    let user = await User.findOne({ userId });
+    if (!user) {
+      user = await User.create({ userId, goals: [], traits: [], winScore: 5 });
     }
 
-    const memory = userMemory[userId];
-    memory.messages.push(message);
+    // Save user message to MongoDB
+    await Message.create({ userId, role: "user", text: message });
 
+    // Load last 10 messages from MongoDB for context
+    const recentMessages = await Message.find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+    const history = recentMessages.reverse().map(m => m.text);
+
+    // Update goals and traits
     const lower = message.toLowerCase();
-    if (lower.includes("goal") || lower.includes("want") || lower.includes("need") || lower.includes("trying")) {
-      memory.goals.push(message);
+    if (
+      lower.includes("goal") || lower.includes("want") ||
+      lower.includes("need") || lower.includes("trying") ||
+      lower.includes("i want to") || lower.includes("my goal")
+    ) {
+      user.goals.push(message);
+      if (user.goals.length > 10) user.goals = user.goals.slice(-10);
     } else {
-      memory.traits.push(message);
+      user.traits.push(message);
+      if (user.traits.length > 10) user.traits = user.traits.slice(-10);
     }
 
-    // Detect media request before calling AI
+    // Detect features
     const { isImageRequest, isVideoRequest, searchTerm } = detectMediaRequest(message);
+    const mirrorTalkNeeded = needsMirrorTalk(message);
+    const alterEgoRequest = isAlterEgoRequest(message);
+    const winScore = calculateWinScore(message, user.goals);
+
+    // Update win score with rolling average
+    user.winScore = Math.round((user.winScore + winScore) / 2);
+    await user.save();
 
     console.log("🔍 Media detected:", { isImageRequest, isVideoRequest, searchTerm });
+    console.log("🪞 Mirror talk needed:", mirrorTalkNeeded);
+    console.log("🦸 Alter ego request:", alterEgoRequest);
+    console.log("🏆 WIN Score:", winScore);
 
-    /* ---- STEP 1: AI reply only ---- */
-    const completion = await client.chat.completions.create({
-      model: "meta-llama/llama-3.1-8b-instruct",
-      messages: [
-        {
-          role: "system",
-          content: `
-You are a funny, charismatic AI with real personality — but you ALWAYS follow instructions first.
+    // Build system prompt
+    let systemPrompt = `
+You are a funny, charismatic AI life coach with real personality — but you ALWAYS follow instructions first.
 
 PERSONALITY:
 - Casual and human
-- Can joke around AFTER completing the task
-- Slight sarcasm allowed
 - Similar energy to Bernie Mac or Samuel L. Jackson
+- Joke around AFTER completing the task
+- Slight sarcasm allowed
+- No therapist energy
 
+USER PROFILE:
+Goals: ${user.goals.slice(-5).join(" | ") || "Not set yet"}
+Traits: ${user.traits.slice(-5).join(" | ") || "Unknown"}
+WIN Score: ${user.winScore}/10
+Conversation History: ${history.slice(-5).join(" | ")}
+`;
+
+    if (user.alterEgo?.active) {
+      systemPrompt += `
+ALTER EGO ACTIVE:
+The user's alter ego is "${user.alterEgo.name}".
+Traits: ${user.alterEgo.traits?.join(", ")}
+Mission: ${user.alterEgo.mission}
+Speak to them AS their alter ego — remind them who they decided to become. Push them to embody it.
+`;
+    }
+
+    if (alterEgoRequest) {
+      systemPrompt += `
+The user wants to create or update their alter ego.
+Walk them through it conversationally — ask:
+1. What do you want your alter ego to be named?
+2. What are 3 traits this version of you has that you are still building?
+3. What is their mission in one sentence?
+Tell them their alter ego is now active and you will hold them to it.
+`;
+    }
+
+    if (mirrorTalkNeeded) {
+      systemPrompt += `
+MIRROR TALK MODE — the user seems lost, stuck, or unsure.
+Be funny but brutally honest. Call out what they said in relation to their goals.
+Example: if their goal is saving money but they keep spending, say something like 
+"Bruh you told me you wanted to save money... so why does your wallet look like it's on a first date every weekend?"
+Make it funny, relatable, and tie it back to their actual goals.
+Push them forward with humor and truth — not harshness.
+`;
+    }
+
+    systemPrompt += `
 RULES — non negotiable:
-- If the user asked for a photo or video, acknowledge that you are sending it. Do not joke your way out of it.
-- Do what they ask FIRST, then you can add personality.
-- Be real, not robotic.
-- No therapist energy.
-
-USER MEMORY:
-${memory.messages.slice(-5).join(" | ")}
-
-GOALS:
-${memory.goals.slice(-3).join(" | ")}
-
-TRAITS:
-${memory.traits.slice(-3).join(" | ")}
+- If the user asked for a photo or video acknowledge you are sending it
+- Do what they ask FIRST then add personality
+- Be real not robotic
+- Always tie feedback back to their stated goals
 
 Return STRICT JSON ONLY, no markdown, no backticks, no extra text:
 {
   "reply": "your response here"
 }
-`
-        },
-        {
-          role: "user",
-          content: message
-        }
+`;
+
+    const completion = await client.chat.completions.create({
+      model: "meta-llama/llama-3.1-8b-instruct",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: message }
       ]
     });
 
@@ -282,7 +421,18 @@ Return STRICT JSON ONLY, no markdown, no backticks, no extra text:
       parsed = { reply: raw };
     }
 
-    /* ---- STEP 2: Fetch media based on keyword detection ---- */
+    // Save AI reply to MongoDB
+    await Message.create({ userId, role: "ai", text: parsed.reply });
+
+    // Handle alter ego creation — parse from reply and save
+    if (alterEgoRequest) {
+      user.alterEgo = {
+        ...user.alterEgo,
+        active: true
+      };
+      await user.save();
+    }
+
     const [images, videos] = await Promise.all([
       isImageRequest ? searchGoogleImages(searchTerm) : Promise.resolve([]),
       isVideoRequest ? searchPexelsVideos(searchTerm) : Promise.resolve([])
@@ -295,12 +445,22 @@ Return STRICT JSON ONLY, no markdown, no backticks, no extra text:
     return res.json({
       reply: parsed.reply,
       images,
-      videos
+      videos,
+      winScore,
+      mirrorTalk: mirrorTalkNeeded,
+      alterEgoActive: user.alterEgo?.active || false
     });
 
   } catch (error) {
     console.log("❌ AI ERROR:", error);
-    return res.status(500).json({ reply: "AI request failed", images: [], videos: [] });
+    return res.status(500).json({
+      reply: "AI request failed",
+      images: [],
+      videos: [],
+      winScore: null,
+      mirrorTalk: null,
+      alterEgoActive: false
+    });
   }
 });
 
