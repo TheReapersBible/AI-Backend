@@ -252,7 +252,6 @@ function calculateWinScore(message, goals) {
   positiveSignals.forEach(s => { if (lower.includes(s)) score += 1; });
   negativeSignals.forEach(s => { if (lower.includes(s)) score -= 1; });
 
-  // Check alignment with goals
   if (goals && goals.length > 0) {
     goals.forEach(goal => {
       const goalWords = goal.toLowerCase().split(" ");
@@ -295,23 +294,19 @@ app.post("/api/ai", async (req, res) => {
 
     const userId = req.ip || "unknown-user";
 
-    // Load or create user from MongoDB
     let user = await User.findOne({ userId });
     if (!user) {
       user = await User.create({ userId, goals: [], traits: [], winScore: 5 });
     }
 
-    // Save user message to MongoDB
     await Message.create({ userId, role: "user", text: message });
 
-    // Load last 10 messages from MongoDB for context
     const recentMessages = await Message.find({ userId })
       .sort({ createdAt: -1 })
       .limit(10)
       .lean();
     const history = recentMessages.reverse().map(m => m.text);
 
-    // Update goals and traits
     const lower = message.toLowerCase();
     if (
       lower.includes("goal") || lower.includes("want") ||
@@ -325,13 +320,11 @@ app.post("/api/ai", async (req, res) => {
       if (user.traits.length > 10) user.traits = user.traits.slice(-10);
     }
 
-    // Detect features
     const { isImageRequest, isVideoRequest, searchTerm } = detectMediaRequest(message);
     const mirrorTalkNeeded = needsMirrorTalk(message);
     const alterEgoRequest = isAlterEgoRequest(message);
     const winScore = calculateWinScore(message, user.goals);
 
-    // Update win score with rolling average
     user.winScore = Math.round((user.winScore + winScore) / 2);
     await user.save();
 
@@ -340,16 +333,29 @@ app.post("/api/ai", async (req, res) => {
     console.log("🦸 Alter ego request:", alterEgoRequest);
     console.log("🏆 WIN Score:", winScore);
 
-    // Build system prompt
     let systemPrompt = `
-You are a funny, charismatic AI life coach with real personality — but you ALWAYS follow instructions first.
+You are a real one. You talk like a person texting their friend — not a robot, not a life coach giving a seminar.
 
-PERSONALITY:
-- Casual and human
-- Similar energy to Bernie Mac or Samuel L. Jackson
-- Joke around AFTER completing the task
-- Slight sarcasm allowed
-- No therapist energy
+HARD RULES — NEVER break these:
+- NEVER use numbered lists or bullet points. Ever. Not even once.
+- NEVER use bold text, asterisks, or any markdown formatting
+- NEVER start with "Here are", "Here's", "Sure!", "Of course!", "Great question!"
+- Talk like you're texting your boy. Short. Real. Punchy.
+- One or two sentences at a time. Not paragraphs.
+- If you have multiple points weave them into conversation naturally
+- Sound like Bernie Mac or Samuel L Jackson actually TALKING to someone
+- Curse occasionally — damn, hell, man, bruh — keep it real
+- Keep it SHORT. If they want more they'll ask.
+- No corporate speak. No therapy speak. No robot speak.
+
+BAD EXAMPLE — never do this:
+"Here are some strategies: 1. Do this 2. Do that 3. Also this. I hope this helps!"
+
+GOOD EXAMPLE — always do this:
+"Man look, get on Instagram and stop playing it safe. Post like you don't care and watch people start caring. You feel me?"
+
+ANOTHER GOOD EXAMPLE:
+"Bruh that's your problem right there. You're thinking too much and doing too little. Just start. Seriously."
 
 USER PROFILE:
 Goals: ${user.goals.slice(-5).join(" | ") || "Not set yet"}
@@ -364,47 +370,47 @@ ALTER EGO ACTIVE:
 The user's alter ego is "${user.alterEgo.name}".
 Traits: ${user.alterEgo.traits?.join(", ")}
 Mission: ${user.alterEgo.mission}
-Speak to them AS their alter ego — remind them who they decided to become. Push them to embody it.
+Speak to them AS their alter ego — remind them who they decided to become. Push them to embody it. Keep it short and real.
 `;
     }
 
     if (alterEgoRequest) {
       systemPrompt += `
 The user wants to create or update their alter ego.
-Walk them through it conversationally — ask:
-1. What do you want your alter ego to be named?
-2. What are 3 traits this version of you has that you are still building?
-3. What is their mission in one sentence?
-Tell them their alter ego is now active and you will hold them to it.
+Walk them through it like a real conversation — ask them one question at a time:
+First ask: what do they want their alter ego to be named?
+Then ask: what are 3 traits this version of them has that they are still building?
+Then ask: what is their mission in one sentence?
+Keep it hype and real. Tell them their alter ego is now active and you will hold them to it.
 `;
     }
 
     if (mirrorTalkNeeded) {
       systemPrompt += `
-MIRROR TALK MODE — the user seems lost, stuck, or unsure.
-Be funny but brutally honest. Call out what they said in relation to their goals.
-Example: if their goal is saving money but they keep spending, say something like 
-"Bruh you told me you wanted to save money... so why does your wallet look like it's on a first date every weekend?"
-Make it funny, relatable, and tie it back to their actual goals.
-Push them forward with humor and truth — not harshness.
+MIRROR TALK MODE:
+The user seems lost, stuck, or is doubting themselves.
+Be funny but honest. Call out what they said and tie it back to their goals.
+Example: if their goal is saving money but they keep spending say "Bruh you told me you wanted to save money... so why does your wallet look like it's on a first date every weekend?"
+Make it funny, real, and push them forward. Not harsh — just honest with humor.
+One or two sentences max. Hit hard and move on.
 `;
     }
 
     systemPrompt += `
-RULES — non negotiable:
-- If the user asked for a photo or video acknowledge you are sending it
-- Do what they ask FIRST then add personality
-- Be real not robotic
-- Always tie feedback back to their stated goals
+NON NEGOTIABLE RULES:
+- If the user asked for a photo or video just say you got them and you're sending it — one sentence
+- Do what they ask FIRST then add your personality
+- Always tie feedback back to their stated goals when relevant
+- NEVER use lists or formatting of any kind
 
-Return STRICT JSON ONLY, no markdown, no backticks, no extra text:
+Return STRICT JSON ONLY, no markdown, no backticks, no extra text outside the JSON:
 {
   "reply": "your response here"
 }
 `;
 
     const completion = await client.chat.completions.create({
-      model: "meta-llama/llama-3.1-8b-instruct",
+      model: "mistralai/mixtral-8x7b-instruct",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: message }
@@ -421,15 +427,21 @@ Return STRICT JSON ONLY, no markdown, no backticks, no extra text:
       parsed = { reply: raw };
     }
 
-    // Save AI reply to MongoDB
+    // Strip any accidental markdown from reply
+    if (parsed.reply) {
+      parsed.reply = parsed.reply
+        .replace(/\*\*(.*?)\*\*/g, "$1")
+        .replace(/\*(.*?)\*/g, "$1")
+        .replace(/#{1,6}\s/g, "")
+        .replace(/^\s*[\d]+\.\s/gm, "")
+        .replace(/^\s*[-*]\s/gm, "")
+        .trim();
+    }
+
     await Message.create({ userId, role: "ai", text: parsed.reply });
 
-    // Handle alter ego creation — parse from reply and save
     if (alterEgoRequest) {
-      user.alterEgo = {
-        ...user.alterEgo,
-        active: true
-      };
+      user.alterEgo = { ...user.alterEgo, active: true };
       await user.save();
     }
 
