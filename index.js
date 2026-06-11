@@ -410,7 +410,7 @@ Return STRICT JSON ONLY, no markdown, no backticks, no extra text outside the JS
 `;
 
     const completion = await client.chat.completions.create({
-      model: "meta-llama/llama-3.3-70b-instruct:free",
+      model: "deepseek/deepseek-chat:free",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: message }
