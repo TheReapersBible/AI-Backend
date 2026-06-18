@@ -410,7 +410,7 @@ Return STRICT JSON ONLY, no markdown, no backticks, no extra text outside the JS
 `;
 
     const completion = await client.chat.completions.create({
-      model: "nvidia/llama-3.1-nemotron-ultra-253b-v1:free",
+      model: "google/gemma-3-27b-it:free",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: message }
