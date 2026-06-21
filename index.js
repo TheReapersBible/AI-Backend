@@ -198,27 +198,26 @@ app.post("/api/speak", async (req, res) => {
 });
 
 /* ========================
-   KEYWORD MEDIA DETECTOR
+   KEYWORD MEDIA DETECTOR (FIXED)
 ======================== */
 function detectMediaRequest(message) {
   const lower = message.toLowerCase();
 
   const imageKeywords = [
-    "show me", "send me a pic", "give me a photo", "give me a picture",
-    "show me a pic", "show me a photo", "show me a picture", "send a pic",
-    "send a photo", "i want to see", "let me see", "picture of", "photo of",
-    "image of", "pic of", "can u show me", "can you show me",
-    "can u send", "can you send", "can u give me", "can you give me",
-    "can u find", "can you find", "find me a pic", "find me a photo",
-    "find a pic", "find a photo", "get me a pic", "get me a photo",
-    "show a pic", "show a photo", "send me", "show me a", "give me a",
-    "can u", "can you"
+    "show me a picture of", "show me a photo of", "show me a pic of",
+    "send me a picture of", "send me a photo of", "send me a pic of",
+    "give me a picture of", "give me a photo of", "give me a pic of",
+    "find me a picture of", "find me a photo of", "find me a pic of",
+    "can you show me a picture of", "can you send me a picture of",
+    "can u show me a picture of", "can u send me a picture of",
+    "i want to see a picture of", "i want to see a photo of",
+    "picture of", "photo of", "image of", "pic of",
+    "show me", "send me", "give me", "find me"
   ];
 
   const videoKeywords = [
-    "show me a video", "send me a video", "find me a video", "video of",
-    "give me a video", "i want to watch", "let me watch", "play a video",
-    "can u show me a video", "can you show me a video"
+    "show me a video of", "send me a video of", "find me a video of",
+    "give me a video of", "video of"
   ];
 
   const isImageRequest = imageKeywords.some(k => lower.includes(k));
@@ -228,23 +227,18 @@ function detectMediaRequest(message) {
     return { isImageRequest: false, isVideoRequest: false, searchTerm: null };
   }
 
-  let searchTerm = lower;
-  [...imageKeywords, ...videoKeywords].forEach(k => {
-    searchTerm = searchTerm.replace(new RegExp(k, "g"), "");
-  });
+  const allKeywords = [...imageKeywords, ...videoKeywords].sort((a, b) => b.length - a.length);
+  let searchTerm = message;
 
-  const fillerWords = [
-    "a", "an", "the", "of", "me", "my", "please", "pls", "plz",
-    "pic", "photo", "picture", "image", "video", "send", "show",
-    "give", "find", "get", "can", "u", "you", "i", "want", "to",
-    "see", "watch", "some", "just", "really", "very"
-  ];
+  for (const k of allKeywords) {
+    const idx = lower.indexOf(k);
+    if (idx !== -1) {
+      searchTerm = message.slice(idx + k.length).trim();
+      break;
+    }
+  }
 
-  fillerWords.forEach(w => {
-    searchTerm = searchTerm.replace(new RegExp(`\\b${w}\\b`, "g"), "");
-  });
-
-  searchTerm = searchTerm.replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+  searchTerm = searchTerm.replace(/[^a-zA-Z0-9 ]/g, "").trim();
   console.log("🧹 Cleaned search term:", searchTerm);
 
   if (!searchTerm || searchTerm.length < 2) searchTerm = message;
@@ -334,8 +328,6 @@ function calculateWinScore(message, goals) {
 
 /* ========================
    ALTER EGO QUESTION FLOW
-   Designed to actually connect emotionally,
-   not just collect data points
 ======================== */
 const alterEgoQuestions = [
   {
@@ -456,7 +448,6 @@ app.post("/api/ai", async (req, res) => {
     if (alterEgoRequest || inAlterEgoFlow) {
       const stage = user.alterEgo.stage || 0;
 
-      // Save the answer to the question they just answered
       if (stage > 0) {
         const prevQ = alterEgoQuestions[stage - 1];
         if (prevQ.field === "affirmations") {
@@ -473,7 +464,6 @@ app.post("/api/ai", async (req, res) => {
         user.alterEgo.stage = nextStage + 1;
         await user.save();
 
-        // Use the AI itself to deliver the question warmly and react to what they just said
         const flowPrompt = `
 You are a warm, wise, emotionally present life coach with deep Southern soul — think Bernie Mac if he sat you down for real talk, not jokes.
 
@@ -512,7 +502,6 @@ Rules:
           alterEgoFlow: true
         });
       } else {
-        // Finished the flow — emotional reveal moment
         user.alterEgo.active = true;
         await user.save();
 
@@ -573,6 +562,19 @@ Rules: no lists, no markdown, talk like a real person, 4-6 sentences max, hit th
 
     await user.save();
 
+    // Only bring up alter ego when it's actually relevant
+    const alterEgoRelevant = user.alterEgo?.active && (
+      lower.includes("alter ego") ||
+      lower.includes((user.alterEgo.name || "zzz").toLowerCase()) ||
+      mirrorTalkNeeded ||
+      affirmationRequest ||
+      lower.includes("motivat") ||
+      lower.includes("discipline") ||
+      lower.includes("excuse") ||
+      lower.includes("who am i") ||
+      lower.includes("remind me")
+    );
+
     let systemPrompt = `
 You are a Southern, Bernie Mac energy life coach — real, funny, deeply wise, talks like a person texting their boy who genuinely cares about them.
 
@@ -587,7 +589,7 @@ HARD RULES — NEVER break these:
 EMOTIONAL CONNECTION — this matters as much as advice:
 - Actually listen to what they said before responding with advice — react to the person first, the problem second
 - If they're sharing something vulnerable, sit with it for a beat before pivoting to action
-- Use their own words and specifics back to them so they know you're tracking their actual life, not giving generic responses
+- Use their own words and specifics back to them so they know you're tracking their actual life
 - Warmth and humor together — never choose just one
 
 ADVICE QUALITY — this is critical:
@@ -598,10 +600,9 @@ ADVICE QUALITY — this is critical:
 - Back up advice with the "why" briefly, woven into the sentence naturally
 - If a topic deserves more than a one liner, give them 3-4 sentences of real substance, still conversational, still no lists
 
-AFFIRMATIONS AND VISUALIZATION:
-- Naturally bring up writing down affirmations and saying them out loud daily when it fits, especially if they seem to be struggling or losing motivation
-- Remind them that visualization isn't woo-woo, it's mental rehearsal — top performers in every field use it
-- Don't force this into every message, only when it actually fits what they're talking about
+STAY ON TOPIC:
+- Answer exactly what they asked about — don't pivot to affirmations, visualization, or their alter ego unless they brought it up or it's clearly relevant
+- Most messages are just normal conversation or advice requests — treat them that way
 
 USER PROFILE:
 Goals: ${user.goals.slice(-5).join(" | ") || "Not set yet"}
@@ -610,9 +611,9 @@ WIN Score: ${user.winScore}/10
 Conversation History: ${history.slice(-5).join(" | ")}
 `;
 
-    if (user.alterEgo?.active) {
+    if (alterEgoRelevant) {
       systemPrompt += `
-ALTER EGO ACTIVE:
+ALTER EGO CONTEXT (only reference this since it's relevant to what they just said):
 The user's alter ego is "${user.alterEgo.name}".
 Why this matters to them deep down: ${user.alterEgo.whyItMatters}
 Mission: ${user.alterEgo.mission}
@@ -620,7 +621,6 @@ Affirmations: ${user.alterEgo.affirmations?.join(", ") || "none set"}
 Known excuse pattern: ${user.alterEgo.excuses}
 Known fear: ${user.alterEgo.fears}
 Known bad habit: ${user.alterEgo.habits}
-Speak to them AS someone who knows their full story. Call back to their excuses/fears/habits and affirmations when relevant — and remember WHY this matters to them, not just what they said. Push them to embody who they're becoming, with real warmth.
 `;
     }
 
@@ -630,7 +630,6 @@ MIRROR TALK MODE:
 The user seems lost, stuck, or doubting themselves.
 Be funny but honest. Call out what they said and tie it back to their goals.
 If they have an alter ego with known excuses/fears/habits, call those out specifically by name.
-Remind them of their affirmations if relevant — ask if they've actually been saying them.
 But underneath the humor, make sure they feel like you actually care, not just clowning them.
 One or two sentences max. Hit hard, with love, and move on.
 `;
@@ -639,16 +638,16 @@ One or two sentences max. Hit hard, with love, and move on.
     if (affirmationRequest) {
       systemPrompt += `
 The user is asking about affirmations or visualization specifically.
-Explain clearly: write affirmations down on paper or notes app, read them out loud every single day — out loud matters, not just reading silently — then spend a minute visualizing it as already true, feeling it in your body.
+Explain clearly: write affirmations down on paper or notes app, read them out loud every single day, then spend a minute visualizing it as already true, feeling it in your body.
 If they have an alter ego with saved affirmations, reference those specific ones.
 `;
     }
 
     systemPrompt += `
 NON NEGOTIABLE RULES:
-- If the user asked for a photo or video just say you got them and you're sending it — one sentence
+- If the user asked for a photo or video, just say you got them and you're sending it — one sentence
+- Do NOT bring up affirmations, visualization, or their alter ego unless it is directly relevant to what they just asked
 - Do what they ask FIRST then add your personality
-- Always tie feedback back to their stated goals when relevant
 - NEVER use lists or formatting of any kind
 
 Return STRICT JSON ONLY, no markdown, no backticks, no extra text outside the JSON:
