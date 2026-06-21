@@ -410,7 +410,7 @@ Return STRICT JSON ONLY, no markdown, no backticks, no extra text outside the JS
 `;
 
     const completion = await client.chat.completions.create({
-      model: "google/gemma-3-27b-it:free",
+      model: "openai/gpt-4o-mini",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: message }
