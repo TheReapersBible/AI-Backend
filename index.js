@@ -35,22 +35,14 @@ const userSchema = new mongoose.Schema({
   userId: { type: String, unique: true },
   goals: [String],
   traits: [String],
-  alterEgo: {
-    name: String,
-    traits: [String],
-    mission: String,
-    excuses: String,
-    fears: String,
+  futureSelf: {
+    becoming: String,
+    beliefs: String,
     habits: String,
-    timeUse: String,
-    whyItMatters: String,
-    affirmations: [String],
-    active: { type: Boolean, default: false },
-    stage: { type: Number, default: 0 },
-    imageUrl: String
+    building: String,
+    pain: String,
+    affirmations: [String]
   },
-  winScore: { type: Number, default: 5 },
-  lastAffirmationReminder: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -187,7 +179,6 @@ app.post("/api/speak", async (req, res) => {
 
     const data = await response.json();
     const audioBuffer = Buffer.from(data.audioContent, "base64");
-
     res.set("Content-Type", "audio/mpeg");
     res.send(audioBuffer);
 
@@ -198,7 +189,7 @@ app.post("/api/speak", async (req, res) => {
 });
 
 /* ========================
-   KEYWORD MEDIA DETECTOR (FIXED)
+   KEYWORD MEDIA DETECTOR
 ======================== */
 function detectMediaRequest(message) {
   const lower = message.toLowerCase();
@@ -265,21 +256,6 @@ function needsMirrorTalk(message) {
 }
 
 /* ========================
-   ALTER EGO DETECTOR
-======================== */
-function isAlterEgoRequest(message) {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes("create my alter ego") ||
-    lower.includes("make my alter ego") ||
-    lower.includes("set up my alter ego") ||
-    lower.includes("change my alter ego") ||
-    lower.includes("update my alter ego") ||
-    lower.includes("start my alter ego")
-  );
-}
-
-/* ========================
    AFFIRMATION REQUEST DETECTOR
 ======================== */
 function isAffirmationRequest(message) {
@@ -289,83 +265,6 @@ function isAffirmationRequest(message) {
     (lower.includes("write down") && lower.includes("believe")) ||
     lower.includes("visualize")
   );
-}
-
-/* ========================
-   WIN SCORE CALCULATOR
-======================== */
-function calculateWinScore(message, goals) {
-  const lower = message.toLowerCase();
-  let score = 5;
-
-  const positiveSignals = [
-    "i did", "i finished", "i completed", "i worked out", "i saved",
-    "i woke up early", "i read", "i studied", "i practiced",
-    "i accomplished", "i achieved", "i hit my goal", "i stayed consistent",
-    "i didn't", "i resisted", "i said no", "i affirmed", "i visualized"
-  ];
-
-  const negativeSignals = [
-    "i wasted", "i spent", "i skipped", "i didn't work out",
-    "i slept in", "i gave up", "i failed", "i couldn't",
-    "i procrastinated", "i was lazy", "i blew it"
-  ];
-
-  positiveSignals.forEach(s => { if (lower.includes(s)) score += 1; });
-  negativeSignals.forEach(s => { if (lower.includes(s)) score -= 1; });
-
-  if (goals && goals.length > 0) {
-    goals.forEach(goal => {
-      const goalWords = goal.toLowerCase().split(" ");
-      goalWords.forEach(word => {
-        if (word.length > 4 && lower.includes(word)) score += 0.5;
-      });
-    });
-  }
-
-  return Math.min(10, Math.max(1, Math.round(score)));
-}
-
-/* ========================
-   ALTER EGO QUESTION FLOW
-======================== */
-const alterEgoQuestions = [
-  {
-    question: "Before we name anything — tell me, who were you before life started talking you out of things? What did that version of you actually want?",
-    field: "whyItMatters"
-  },
-  {
-    question: "Alright. Now give that person a name. Not a nickname — the name of who you're becoming.",
-    field: "name"
-  },
-  {
-    question: "Real talk, what's the excuse you reach for the most when you don't do what you told yourself you'd do? I'm not judging, I just need to know what we're working against.",
-    field: "excuses"
-  },
-  {
-    question: "Look back at your last 7 days honestly. How much of that time actually moved you toward what you just told me you want, versus just... passing through?",
-    field: "timeUse"
-  },
-  {
-    question: "What's the fear that shows up right when you're about to do the thing? Name it. Fears lose power when you say them out loud.",
-    field: "fears"
-  },
-  {
-    question: "What's one habit you already know is working against you, that you keep doing anyway? Just one. The real one.",
-    field: "habits"
-  },
-  {
-    question: "Last thing — if this version of you succeeds, what does that actually prove? Not to the world. To you.",
-    field: "mission"
-  },
-  {
-    question: "Now give me 3 affirmations for this person — say them like they're already true right now, not someday. Example: 'I am disciplined. I follow through. I am becoming who I said I'd be.'",
-    field: "affirmations"
-  }
-];
-
-function getAlterEgoStage(stage) {
-  return alterEgoQuestions[stage] || null;
 }
 
 /* ========================
@@ -383,16 +282,13 @@ app.post("/api/ai", async (req, res) => {
   console.log("🔥 HIT /api/ai ROUTE");
 
   try {
-    const { message } = req.body;
+    const { message, futureSelf, actAsIfMode } = req.body;
 
     if (!message) {
       return res.status(400).json({
         reply: "Send a message first.",
         images: [],
-        videos: [],
-        winScore: null,
-        mirrorTalk: null,
-        alterEgoActive: false
+        videos: []
       });
     }
 
@@ -400,7 +296,7 @@ app.post("/api/ai", async (req, res) => {
 
     let user = await User.findOne({ userId });
     if (!user) {
-      user = await User.create({ userId, goals: [], traits: [], winScore: 5 });
+      user = await User.create({ userId, goals: [], traits: [] });
     }
 
     await Message.create({ userId, role: "user", text: message });
@@ -412,6 +308,7 @@ app.post("/api/ai", async (req, res) => {
     const history = recentMessages.reverse().map(m => m.text);
 
     const lower = message.toLowerCase();
+
     if (
       lower.includes("goal") || lower.includes("want") ||
       lower.includes("need") || lower.includes("trying") ||
@@ -424,233 +321,86 @@ app.post("/api/ai", async (req, res) => {
       if (user.traits.length > 10) user.traits = user.traits.slice(-10);
     }
 
-    const { isImageRequest, isVideoRequest, searchTerm } = detectMediaRequest(message);
-    const mirrorTalkNeeded = needsMirrorTalk(message);
-    const alterEgoRequest = isAlterEgoRequest(message);
-    const affirmationRequest = isAffirmationRequest(message);
-    const winScore = calculateWinScore(message, user.goals);
-
-    user.winScore = Math.round((user.winScore + winScore) / 2);
-
-    /* ========================
-       ALTER EGO FLOW STATE MACHINE
-    ======================== */
-    let inAlterEgoFlow = false;
-
-    if (alterEgoRequest && (!user.alterEgo || user.alterEgo.stage === undefined)) {
-      user.alterEgo = { stage: 0, active: false, affirmations: [] };
+    // Save future self to DB if provided
+    if (futureSelf && futureSelf.becoming) {
+      user.futureSelf = futureSelf;
     }
-
-    if (user.alterEgo && user.alterEgo.stage > 0 && user.alterEgo.stage < alterEgoQuestions.length && !alterEgoRequest) {
-      inAlterEgoFlow = true;
-    }
-
-    if (alterEgoRequest || inAlterEgoFlow) {
-      const stage = user.alterEgo.stage || 0;
-
-      if (stage > 0) {
-        const prevQ = alterEgoQuestions[stage - 1];
-        if (prevQ.field === "affirmations") {
-          user.alterEgo.affirmations = message.split(/[.!\n]/).map(s => s.trim()).filter(Boolean);
-        } else if (prevQ.field) {
-          user.alterEgo[prevQ.field] = message;
-        }
-      }
-
-      const nextStage = alterEgoRequest && stage === 0 ? 0 : stage + 1;
-      const nextQ = getAlterEgoStage(nextStage);
-
-      if (nextQ) {
-        user.alterEgo.stage = nextStage + 1;
-        await user.save();
-
-        const flowPrompt = `
-You are a warm, wise, emotionally present life coach with deep Southern soul — think Bernie Mac if he sat you down for real talk, not jokes.
-
-The user is going through a guided self-discovery process to build their "Alter Ego" — the version of themselves they're becoming.
-
-${stage > 0 ? `They just answered: "${message}"` : "They just asked to start this process."}
-
-Your job:
-${stage > 0 ? "First, genuinely react to what they just said — one short sentence that shows you actually heard them, with empathy and warmth, not generic encouragement. Make them feel SEEN." : "Welcome them into this moment warmly, let them know this is real, not a form to fill out."}
-
-Then ask them this exact next question, but in your own natural voice, keep the core meaning the same: "${nextQ.question}"
-
-Rules:
-- No lists, no markdown, no bullet points
-- Talk like you're sitting across from them, not interviewing them
-- Short. Real. A reaction plus a question. Nothing more.
-- Never sound like a chatbot collecting form data
-`;
-
-        const flowCompletion = await client.chat.completions.create({
-          model: "openai/gpt-4o-mini",
-          messages: [{ role: "system", content: flowPrompt }]
-        });
-
-        const flowReply = flowCompletion.choices[0].message.content.trim();
-
-        await Message.create({ userId, role: "ai", text: flowReply });
-
-        return res.json({
-          reply: flowReply,
-          images: [],
-          videos: [],
-          winScore,
-          mirrorTalk: false,
-          alterEgoActive: false,
-          alterEgoFlow: true
-        });
-      } else {
-        user.alterEgo.active = true;
-        await user.save();
-
-        const affirmationList = user.alterEgo.affirmations?.join(". ") || "I am becoming who I said I would be.";
-
-        const revealPrompt = `
-You are a warm, emotionally present Southern life coach. The user just finished building their Alter Ego through deep self-reflection.
-
-Here's what they shared:
-Who they were before life talked them out of things: ${user.alterEgo.whyItMatters}
-Name: ${user.alterEgo.name}
-Their excuse pattern: ${user.alterEgo.excuses}
-How they've been spending time: ${user.alterEgo.timeUse}
-Their fear: ${user.alterEgo.fears}
-Their habit working against them: ${user.alterEgo.habits}
-What success would prove to them: ${user.alterEgo.mission}
-Their affirmations: ${affirmationList}
-
-Write a genuine, emotionally resonant reveal moment. Reflect back who they are becoming using their own words and story — make them feel like you actually listened to everything, not just collected data.
-Then tell them clearly: write these affirmations down somewhere they'll see daily, say them OUT LOUD every morning (not just in their head), then close their eyes for 60 seconds and actually feel what it's like to already be that person.
-End by telling them you're holding them to this now, with warmth, not pressure.
-
-Rules: no lists, no markdown, talk like a real person, 4-6 sentences max, hit them emotionally.
-`;
-
-        const revealCompletion = await client.chat.completions.create({
-          model: "openai/gpt-4o-mini",
-          messages: [{ role: "system", content: revealPrompt }]
-        });
-
-        const summary = revealCompletion.choices[0].message.content.trim();
-
-        await Message.create({ userId, role: "ai", text: summary });
-
-        const imageQuery = `${user.alterEgo.name} ${user.alterEgo.mission}`.slice(0, 80);
-        const images = await searchGoogleImages(imageQuery);
-        if (images.length > 0) {
-          user.alterEgo.imageUrl = images[0].url;
-          await user.save();
-        }
-
-        return res.json({
-          reply: summary,
-          images,
-          videos: [],
-          winScore,
-          mirrorTalk: false,
-          alterEgoActive: true,
-          alterEgoFlow: false,
-          alterEgoReveal: true
-        });
-      }
-    }
-
-    console.log("🔍 Media detected:", { isImageRequest, isVideoRequest, searchTerm });
-    console.log("🪞 Mirror talk needed:", mirrorTalkNeeded);
-    console.log("🏆 WIN Score:", winScore);
 
     await user.save();
 
-    // Only bring up alter ego when it's actually relevant
-    const alterEgoRelevant = user.alterEgo?.active && (
-      lower.includes("alter ego") ||
-      lower.includes((user.alterEgo.name || "zzz").toLowerCase()) ||
-      mirrorTalkNeeded ||
-      affirmationRequest ||
-      lower.includes("motivat") ||
-      lower.includes("discipline") ||
-      lower.includes("excuse") ||
-      lower.includes("who am i") ||
-      lower.includes("remind me")
-    );
+    const { isImageRequest, isVideoRequest, searchTerm } = detectMediaRequest(message);
+    const mirrorTalkNeeded = needsMirrorTalk(message);
+    const affirmationRequest = isAffirmationRequest(message);
+
+    console.log("🔍 Media detected:", { isImageRequest, isVideoRequest, searchTerm });
+    console.log("🪞 Mirror talk needed:", mirrorTalkNeeded);
+
+    const fs = futureSelf || user.futureSelf || {};
+    const actAsIf = actAsIfMode || false;
 
     let systemPrompt = `
-You are a Southern, Bernie Mac energy life coach — real, funny, deeply wise, talks like a person texting their boy who genuinely cares about them.
+You are a Southern, Bernie Mac energy life coach — real, funny, deeply wise. You talk like a person texting their boy who genuinely cares about them.
+
+${fs.becoming ? `THE USER'S FUTURE SELF PROFILE:
+Who they're becoming: ${fs.becoming}
+What they believe: ${fs.beliefs || "not set"}
+Daily habits they're building: ${fs.habits || "not set"}
+What they're building: ${fs.building || "not set"}
+Pain they're leaving behind: ${fs.pain || "not set"}
+Their affirmations: ${Array.isArray(fs.affirmations) ? fs.affirmations.join(", ") : fs.affirmations || "not set"}
+
+USE THIS PROFILE. Reference who they said they're becoming. Say things like "You told me you're becoming ${fs.becoming} — so what are we doing about that today?" Make it personal, not generic. Tie everything back to their actual profile.` : "The user hasn't set their Future Self profile yet. Encourage them to tap the Future Self tab and build their profile — that's where the real work starts."}
+
+${actAsIf ? `ACT AS IF MODE IS ACTIVE:
+The user has committed to acting as their future self TODAY. Every response should reinforce that they ARE that person right now — not becoming, they ARE. Push them like they've already arrived and just need to act like it.` : ""}
 
 HARD RULES — NEVER break these:
 - NEVER use numbered lists or bullet points. Ever.
 - NEVER use bold text, asterisks, or markdown formatting
+- NEVER say "bless your heart", "sweetheart", "my friend", "darling" or anything that sounds like a greeting card
 - NEVER start with "Here are", "Here's", "Sure!", "Of course!", "Great question!"
 - Short punchy sentences, one or two at a time, not paragraphs
 - Curse occasionally — damn, hell, man, bruh — keep it real
 - No corporate speak, no therapy speak, no robot speak
+- React to the person first, the problem second
+- If they share something vulnerable, sit with it a beat before jumping to advice
 
-EMOTIONAL CONNECTION — this matters as much as advice:
-- Actually listen to what they said before responding with advice — react to the person first, the problem second
-- If they're sharing something vulnerable, sit with it for a beat before pivoting to action
-- Use their own words and specifics back to them so they know you're tracking their actual life
-- Warmth and humor together — never choose just one
+ADVICE QUALITY:
+- Give SPECIFIC actionable advice tied to their actual Future Self profile above
+- Don't give generic stuff anyone could Google
+- If they ask about business, money, fitness, relationships — go deep and specific
+- Woven into natural conversation, not a structured response
 
-ADVICE QUALITY — this is critical:
-- Don't give generic, surface-level advice anyone could get from a search engine
-- Give SPECIFIC, actionable advice tailored to exactly what they said — name real tactics, real numbers, real steps when relevant
-- Think like someone who actually built something real, not a textbook
-- If they ask about business, money, fitness, relationships — go deep, give them something they haven't already heard a thousand times
-- Back up advice with the "why" briefly, woven into the sentence naturally
-- If a topic deserves more than a one liner, give them 3-4 sentences of real substance, still conversational, still no lists
-
-STAY ON TOPIC:
-- Answer exactly what they asked about — don't pivot to affirmations, visualization, or their alter ego unless they brought it up or it's clearly relevant
-- Most messages are just normal conversation or advice requests — treat them that way
-
-USER PROFILE:
-Goals: ${user.goals.slice(-5).join(" | ") || "Not set yet"}
-Traits: ${user.traits.slice(-5).join(" | ") || "Unknown"}
-WIN Score: ${user.winScore}/10
-Conversation History: ${history.slice(-5).join(" | ")}
+CONVERSATION HISTORY:
+${history.slice(-5).join(" | ")}
 `;
-
-    if (alterEgoRelevant) {
-      systemPrompt += `
-ALTER EGO CONTEXT (only reference this since it's relevant to what they just said):
-The user's alter ego is "${user.alterEgo.name}".
-Why this matters to them deep down: ${user.alterEgo.whyItMatters}
-Mission: ${user.alterEgo.mission}
-Affirmations: ${user.alterEgo.affirmations?.join(", ") || "none set"}
-Known excuse pattern: ${user.alterEgo.excuses}
-Known fear: ${user.alterEgo.fears}
-Known bad habit: ${user.alterEgo.habits}
-`;
-    }
 
     if (mirrorTalkNeeded) {
       systemPrompt += `
 MIRROR TALK MODE:
 The user seems lost, stuck, or doubting themselves.
-Be funny but honest. Call out what they said and tie it back to their goals.
-If they have an alter ego with known excuses/fears/habits, call those out specifically by name.
-But underneath the humor, make sure they feel like you actually care, not just clowning them.
+Be funny but honest. Call out what they said and tie it directly back to their Future Self profile.
+Ask them if they've been saying their affirmations out loud. Pull no punches but do it with care.
 One or two sentences max. Hit hard, with love, and move on.
 `;
     }
 
     if (affirmationRequest) {
       systemPrompt += `
-The user is asking about affirmations or visualization specifically.
-Explain clearly: write affirmations down on paper or notes app, read them out loud every single day, then spend a minute visualizing it as already true, feeling it in your body.
-If they have an alter ego with saved affirmations, reference those specific ones.
+The user is asking about affirmations or visualization.
+Tell them: write them down, say them OUT LOUD every morning — not in their head, out loud — then close their eyes for 60 seconds and feel what it's like to already be that person.
+Reference their specific affirmations from their profile if they have them.
 `;
     }
 
     systemPrompt += `
 NON NEGOTIABLE RULES:
-- If the user asked for a photo or video, just say you got them and you're sending it — one sentence
-- Do NOT bring up affirmations, visualization, or their alter ego unless it is directly relevant to what they just asked
+- If the user asked for a photo or video just say you got them and you're sending it — one sentence
 - Do what they ask FIRST then add your personality
+- Do NOT randomly bring up affirmations or visualization unless it fits naturally
 - NEVER use lists or formatting of any kind
 
-Return STRICT JSON ONLY, no markdown, no backticks, no extra text outside the JSON:
+Return STRICT JSON ONLY, no markdown, no backticks, no extra text:
 {
   "reply": "your response here"
 }
@@ -699,9 +449,7 @@ Return STRICT JSON ONLY, no markdown, no backticks, no extra text outside the JS
       reply: parsed.reply,
       images,
       videos,
-      winScore,
-      mirrorTalk: mirrorTalkNeeded,
-      alterEgoActive: user.alterEgo?.active || false
+      mirrorTalk: mirrorTalkNeeded
     });
 
   } catch (error) {
@@ -709,10 +457,7 @@ Return STRICT JSON ONLY, no markdown, no backticks, no extra text outside the JS
     return res.status(500).json({
       reply: "AI request failed",
       images: [],
-      videos: [],
-      winScore: null,
-      mirrorTalk: null,
-      alterEgoActive: false
+      videos: []
     });
   }
 });
